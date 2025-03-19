@@ -1,0 +1,22 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="1024" height="1024" rx="200" fill="#FF6347"/>
+  
+  <!-- Plate/Circle -->
+  <circle cx="512" cy="512" r="350" fill="white"/>
+  
+  <!-- Fork -->
+  <path d="M400 300V724" stroke="#FF6347" stroke-width="40" stroke-linecap="round"/>
+  <path d="M400 300C400 300 400 250 400 220C400 190 420 170 450 170C480 170 500 190 500 220C500 250 500 300 500 300" stroke="#FF6347" stroke-width="40" stroke-linecap="round"/>
+  
+  <!-- Knife -->
+  <path d="M624 300V724" stroke="#FF6347" stroke-width="40" stroke-linecap="round"/>
+  <path d="M574 220C574 190 594 170 624 170C654 170 674 190 674 220C674 250 624 300 624 300" stroke="#FF6347" stroke-width="40" stroke-linecap="round"/>
+  
+  <!-- Timer Arc -->
+  <path d="M312 512C312 401.543 401.543 312 512 312" stroke="#FF6347" stroke-width="40" stroke-linecap="round"/>
+  
+  <!-- Timer Dots -->
+  <circle cx="512" cy="312" r="20" fill="#FF6347"/>
+  <circle cx="312" cy="512" r="20" fill="#FF6347"/>
+</svg>
