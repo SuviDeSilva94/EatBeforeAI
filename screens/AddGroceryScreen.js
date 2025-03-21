@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Image, Alert, Platform, SafeAreaView } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert, Platform, SafeAreaView } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Image } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import Icon from 'react-native-vector-icons/MaterialIcons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ImagePicker from 'expo-image-picker';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const AddGroceryScreen = ({ navigation }) => {
   const [name, setName] = useState('');
@@ -10,6 +13,86 @@ const AddGroceryScreen = ({ navigation }) => {
   const [expiryDate, setExpiryDate] = useState('');
   const [date, setDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [image, setImage] = useState(null);
+  const [productRecognitionResult, setProductRecognitionResult] = useState('');
+
+  // Initialize Gemini AI with environment variable
+  const genAI = new GoogleGenerativeAI(process.env.EXPO_PUBLIC_GEMINI_API_KEY);
+
+  const analyzeProductImage = async (imageUri) => {
+    try {
+      if (!process.env.EXPO_PUBLIC_GEMINI_API_KEY) {
+        Alert.alert('Configuration Error', 'Gemini API key is not configured. Please check your environment settings.');
+        return;
+      }
+
+      setProductRecognitionResult('Analyzing image...');
+      const model = genAI.getGenerativeModel({ model: 'gemini-pro-vision' });
+      
+      // Convert image URI to base64
+      const response = await fetch(imageUri);
+      const blob = await response.blob();
+      const reader = new FileReader();
+      const base64Data = await new Promise((resolve, reject) => {
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('Failed to read image'));
+        reader.readAsDataURL(blob);
+      });
+
+      const result = await model.generateContent([
+        'What product is shown in this image? Please provide the name and category (Fruits, Vegetables, Meat, Dairy, Frozen, or Other). Format: Product Name, Category',
+        { inlineData: { data: base64Data.split(',')[1], mimeType: 'image/jpeg' } }
+      ]);
+
+      const responseText = await result.response.text();
+      
+      // Parse the response to get product name and category
+      const [productName, productCategory] = responseText.split(',').map(item => item.trim());
+      if (!productName) {
+        throw new Error('Could not recognize the product in the image');
+      }
+
+      // Validate category
+      const validCategories = ['Fruits', 'Vegetables', 'Meat', 'Dairy', 'Frozen', 'Other'];
+      const normalizedCategory = productCategory ? 
+        validCategories.find(c => c.toLowerCase() === productCategory.toLowerCase()) || 'Other' : 
+        'Other';
+
+      setName(productName);
+      setCategory(normalizedCategory);
+      setProductRecognitionResult(`Recognized as: ${productName} (${normalizedCategory})`);
+    } catch (error) {
+      console.error('Error analyzing image:', error);
+      Alert.alert('Error', 'Failed to analyze product image. Please try again or enter details manually.');
+      setProductRecognitionResult('Failed to recognize product');
+    }
+  };
+
+  const pickImage = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Please grant camera roll permissions to upload an image.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+
+      if (!result.canceled) {
+        setImage(result.assets[0].uri);
+        await analyzeProductImage(result.assets[0].uri);
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert('Error', 'Failed to pick image');
+    }
+  };
   
   // Categories for selection
   const categories = [
@@ -47,46 +130,74 @@ const AddGroceryScreen = ({ navigation }) => {
   
   // Handle date change
   const onDateChange = (event, selectedDate) => {
-    const currentDate = selectedDate || date;
     setShowDatePicker(false);
-    setDate(currentDate);
-    setExpiryDate(formatDate(currentDate));
+    if (event.type === 'set' && selectedDate) {
+      const currentDate = selectedDate;
+      if (currentDate < new Date()) {
+        Alert.alert('Invalid Date', 'Please select a future date');
+        return;
+      }
+      setDate(currentDate);
+      setExpiryDate(formatDate(currentDate));
+    }
+  };
+
+  const showDatePickerModal = () => {
+    if (Platform.OS === 'android') {
+      setShowDatePicker(true);
+    } else {
+      setShowDatePicker(true);
+    }
   };
 
   const handleSave = async () => {
-    // Validate inputs
-    if (!name || !category || !expiryDate) {
-      Alert.alert('Error', 'Please fill in all fields');
-      return;
-    }
-
-    // Create new grocery item
-    const newItem = {
-      id: Date.now().toString(),
-      name,
-      category,
-      expiryDate,
-      daysUntilExpiry: calculateDaysUntilExpiry(expiryDate),
-      // In a real app, you would handle image upload
-      // For demo, we'll use a placeholder based on category
-      image: category === 'Fruits' ? require('../assets/banana.png') :
-             category === 'Meat' ? require('../assets/chicken.png') :
-             require('../assets/chocolate.png'),
-    };
-
     try {
-      // In a real app, you would save to AsyncStorage or a database
-      // For demo purposes, we'll just navigate back
+      // Enhanced input validation
+      if (!image) {
+        Alert.alert('Missing Image', 'Please select a product image');
+        return;
+      }
+      if (!name.trim()) {
+        Alert.alert('Missing Name', 'Please enter a product name');
+        return;
+      }
+      if (!category) {
+        Alert.alert('Missing Category', 'Please select a product category');
+        return;
+      }
+      if (!expiryDate) {
+        Alert.alert('Missing Date', 'Please select an expiry date');
+        return;
+      }
+
+      // Create new grocery item with actual image URI
+      const newItem = {
+        id: Date.now().toString(),
+        name: name.trim(),
+        category,
+        expiryDate,
+        daysUntilExpiry: calculateDaysUntilExpiry(date.toISOString()),
+        imageUri: image
+      };
+
+      // Save to AsyncStorage
+      const existingItemsStr = await AsyncStorage.getItem('groceryItems');
+      const existingItems = existingItemsStr ? JSON.parse(existingItemsStr) : [];
+      existingItems.push(newItem);
+      await AsyncStorage.setItem('groceryItems', JSON.stringify(existingItems));
+      
       Alert.alert('Success', 'Grocery item added successfully');
       navigation.goBack();
     } catch (error) {
-      Alert.alert('Error', 'Failed to save grocery item');
+      console.error('Error saving item:', error);
+      Alert.alert('Error', 'Failed to save grocery item. Please try again.');
     }
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView>
+      {
+        <ScrollView>
         <View style={styles.header}>
           <TouchableOpacity 
             style={styles.backButton}
@@ -97,80 +208,139 @@ const AddGroceryScreen = ({ navigation }) => {
           <Text style={styles.headerTitle}>Add Grocery Item</Text>
         </View>
 
-      <View style={styles.formContainer}>
-        <View style={styles.inputContainer}>
-          <Text style={styles.label}>Name</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Enter grocery name"
-            value={name}
-            onChangeText={setName}
-          />
+        <View style={styles.imageContainer}>
+          <TouchableOpacity 
+            style={styles.imagePicker} 
+            onPress={pickImage}
+          >
+            {image ? (
+              <Image
+                source={{ uri: image }}
+                style={styles.imagePreview}
+                resizeMode="cover"
+              />
+            ) : (
+              <View style={styles.placeholderContainer}>
+                <Icon name="add-photo-alternate" size={40} color="#999" />
+                <Text style={styles.placeholderText}>Select Photo</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+          {productRecognitionResult ? (
+            <Text style={styles.recognitionText}>{productRecognitionResult}</Text>
+          ) : null}
         </View>
 
-        <View style={styles.inputContainer}>
-          <Text style={styles.label}>Category</Text>
-          <View style={styles.categoriesContainer}>
-            {categories.map((cat) => (
-              <TouchableOpacity
-                key={cat.id}
-                style={[
-                  styles.categoryChip,
-                  category === cat.name && styles.selectedCategoryChip
-                ]}
-                onPress={() => setCategory(cat.name)}
-              >
-                <Text 
-                  style={[
-                    styles.categoryChipText,
-                    category === cat.name && styles.selectedCategoryChipText
-                  ]}
-                >
-                  {cat.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
+        <View style={styles.formContainer}>
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Name</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Enter grocery name"
+              value={name}
+              onChangeText={setName}
+            />
           </View>
-        </View>
 
-        <View style={styles.inputContainer}>
-          <View style={styles.dateInputRow}>
-            <Text style={styles.dateLabel}>Expiry Date</Text>
-            <View style={styles.dateInput}>
-              <Text style={expiryDate ? styles.dateText : styles.datePlaceholder}>
-                {expiryDate || 'Select date'}
-              </Text>
-              <TouchableOpacity onPress={() => setShowDatePicker(true)}>
-                <Icon name="calendar-today" size={20} color="#999" />
-              </TouchableOpacity>
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Category</Text>
+            <View style={styles.categoriesContainer}>
+              {categories.map((cat) => (
+                <TouchableOpacity
+                  key={cat.id}
+                  style={[
+                    styles.categoryChip,
+                    category === cat.name && styles.selectedCategoryChip
+                  ]}
+                  onPress={() => setCategory(cat.name)}
+                >
+                  <Text 
+                    style={[
+                      styles.categoryChipText,
+                      category === cat.name && styles.selectedCategoryChipText
+                    ]}
+                  >
+                    {cat.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
-          {showDatePicker && (
-            <DateTimePicker
-              testID="dateTimePicker"
-              value={date}
-              mode="date"
-              display="default"
-              onChange={onDateChange}
-              minimumDate={new Date()}
-              style={styles.datePicker}
-            />
-          )}
-        </View>
 
-        <TouchableOpacity 
-          style={styles.saveButton}
-          onPress={handleSave}
-        >
-          <Text style={styles.saveButtonText}>Save Item</Text>
-        </TouchableOpacity>
-      </View>
+          <View style={styles.inputContainer}>
+            <View style={styles.dateInputRow}>
+              <Text style={styles.dateLabel}>Expiry Date</Text>
+              <View style={styles.dateInput}>
+                <Text style={expiryDate ? styles.dateText : styles.datePlaceholder}>
+                  {expiryDate || 'Select date'}
+                </Text>
+                <TouchableOpacity onPress={() => setShowDatePicker(true)}>
+                  <Icon name="calendar-today" size={20} color="#999" />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {showDatePicker && (
+              <DateTimePicker
+                testID="dateTimePicker"
+                value={date}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={onDateChange}
+                minimumDate={new Date()}
+                style={styles.datePicker}
+              />
+            )}
+          </View>
+
+          <TouchableOpacity 
+            style={styles.saveButton}
+            onPress={handleSave}
+          >
+            <Text style={styles.saveButtonText}>Save Item</Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
+}
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  recognitionText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#007AFF',
+    textAlign: 'center',
+  },
+  imageContainer: {
+    padding: 16,
+    alignItems: 'center',
+  },
+  imagePicker: {
+    width: 200,
+    height: 200,
+    borderRadius: 12,
+    backgroundColor: '#F8F8F8',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    borderStyle: 'dashed',
+  },
+  imagePreview: {
+    width: '100%',
+    height: '100%',
+  },
+  placeholderContainer: {
+    alignItems: 'center',
+  },
+  placeholderText: {
+    marginTop: 8,
+    fontSize: 16,
+    color: '#999',
+  },
   container: {
     flex: 1,
     backgroundColor: '#F2F2F7', // iOS system background color
@@ -233,8 +403,8 @@ const styles = StyleSheet.create({
     minHeight: 32,
   },
   selectedCategoryChip: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
+    backgroundColor: '#FF6347',
+    borderColor: '#FF6347',
   },
   categoryChipText: {
     fontSize: 15,
@@ -285,12 +455,17 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   saveButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#FF6347',
     borderRadius: 10,
     padding: 16,
     alignItems: 'center',
     marginTop: 24,
     minHeight: 50,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   saveButtonText: {
     color: '#FFFFFF',

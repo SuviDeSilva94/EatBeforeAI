@@ -32,7 +32,7 @@ const MainTabNavigator = () => {
           );
         },
         tabBarActiveTintColor: '#FF6347',
-        tabBarInactiveTintColor: 'gray',
+        tabBarInactiveTintColor: '#FF8B7F',
         tabBarShowLabel: false,
         headerShown: false,
         tabBarStyle: {
@@ -60,6 +60,14 @@ const styles = StyleSheet.create({
   },
   activeIconContainer: {
     backgroundColor: '#FFF0EE',
+    shadowColor: '#FF6347',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
 });
 
